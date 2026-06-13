@@ -11,6 +11,7 @@ import type {
   Trip
 } from '../../shared/types';
 import { calculateReputationGrade, calculateWarehouseCapacity, calculateWarehouseUpgradeCost } from './settlement';
+import { createInitialSilverBank } from './silverBank';
 
 export const generateId = (): string => {
   return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -26,7 +27,8 @@ export const generateRandomCommissions = (
   goodsList: Goods[],
   cities: City[],
   reputationGrade: string,
-  count: number = 6
+  count: number = 6,
+  largeCommissionUnlocked: boolean = false
 ): Commission[] => {
   const commissions: Commission[] = [];
   const destinations = cities.filter(c => c.id !== 'yuegang');
@@ -36,18 +38,28 @@ export const generateRandomCommissions = (
   else if (reputationGrade === '乙') qualityMultiplier = 1.2;
   else if (reputationGrade === '丁') qualityMultiplier = 0.8;
   
+  const largeCommissionChance = largeCommissionUnlocked ? 0.3 : 0;
+  
   for (let i = 0; i < count; i++) {
     const goods = goodsList[Math.floor(Math.random() * goodsList.length)];
     const destination = destinations[Math.floor(Math.random() * destinations.length)];
     
-    const baseQuantity = Math.floor(Math.random() * 15) + 5;
+    const isLargeCommission = Math.random() < largeCommissionChance;
+    
+    const baseQuantity = isLargeCommission 
+      ? Math.floor(Math.random() * 30) + 30 
+      : Math.floor(Math.random() * 15) + 5;
     const quantity = Math.ceil(baseQuantity * qualityMultiplier);
     
     const baseReward = goods.basePrice * quantity;
-    const rewardMultiplier = 1.2 + Math.random() * 0.6;
+    const rewardMultiplier = isLargeCommission 
+      ? 1.8 + Math.random() * 0.8 
+      : 1.2 + Math.random() * 0.6;
     const reward = Math.floor(baseReward * rewardMultiplier * qualityMultiplier);
     
-    const deadlineBase = 12 + Math.floor(Math.random() * 36);
+    const deadlineBase = isLargeCommission 
+      ? 24 + Math.floor(Math.random() * 48) 
+      : 12 + Math.floor(Math.random() * 36);
     const deadlineHours = Math.ceil(deadlineBase / qualityMultiplier);
     
     const isEmergency = Math.random() < 0.2;
@@ -65,6 +77,7 @@ export const generateRandomCommissions = (
       deadlineHours: finalDeadline,
       fragility: goods.fragility,
       isAccepted: false,
+      isLargeCommission,
       createdAt: Date.now(),
     });
   }
@@ -175,6 +188,7 @@ export const createInitialSaveGame = (): SaveGame => {
     vehicles: createInitialVehicles(),
     warehouse: createInitialWarehouse(),
     ledger: [],
+    silverBank: createInitialSilverBank(),
     currentWeatherId: 'sunny',
     savedAt: Date.now(),
   };

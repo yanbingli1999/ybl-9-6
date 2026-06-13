@@ -43,14 +43,20 @@ const CommissionCard = ({
   const bonusMultiplier = 1 + (player.priceBonus / 100);
   const adjustedReward = Math.floor(commission.reward * bonusMultiplier);
   const isEmergency = commission.deadlineHours < 15;
+  const isLarge = commission.isLargeCommission;
 
   return (
     <div className={`relative bg-white rounded-xl shadow-md border-2 transition-all hover:shadow-lg ${
       isSelected ? 'border-amber-500 ring-2 ring-amber-500/30' : 'border-slate-200'
-    } ${commission.isAccepted ? 'opacity-60' : ''}`}>
+    } ${isLarge ? 'border-purple-300' : ''} ${commission.isAccepted ? 'opacity-60' : ''}`}>
       {isEmergency && (
         <div className="absolute -top-2 -right-2 px-2 py-0.5 bg-red-500 text-white text-xs font-bold rounded-full">
           紧急
+        </div>
+      )}
+      {isLarge && (
+        <div className="absolute -top-2 -left-2 px-2 py-0.5 bg-purple-500 text-white text-xs font-bold rounded-full">
+          大额
         </div>
       )}
       

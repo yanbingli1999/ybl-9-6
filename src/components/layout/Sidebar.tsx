@@ -1,5 +1,5 @@
 import { NavLink } from 'react-router-dom';
-import { Anchor, Map, Truck, Warehouse, BookOpen, Clock } from 'lucide-react';
+import { Anchor, Map, Truck, Warehouse, BookOpen, Clock, Landmark } from 'lucide-react';
 import { useGameStore } from '../../store/useGameStore';
 
 const Sidebar = () => {
@@ -9,6 +9,7 @@ const Sidebar = () => {
   
   const navItems = [
     { path: '/', icon: Anchor, label: '港口大厅', time: ['morning', 'afternoon'] },
+    { path: '/silver-bank', icon: Landmark, label: '裕丰银号', time: ['morning', 'afternoon', 'evening', 'night'] },
     { path: '/route', icon: Map, label: '路线规划', time: ['afternoon', 'evening'] },
     { path: '/transport', icon: Truck, label: '运输管理', time: ['evening', 'night'] },
     { path: '/warehouse', icon: Warehouse, label: '仓库管理', time: ['morning', 'afternoon', 'evening', 'night'] },

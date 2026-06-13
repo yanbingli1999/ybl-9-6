@@ -79,6 +79,7 @@ export interface Commission {
   deadlineHours: number;
   fragility: number;
   isAccepted: boolean;
+  isLargeCommission?: boolean;
   isShipped?: boolean;
   isCompleted?: boolean;
   createdAt?: number;
@@ -142,6 +143,42 @@ export interface LedgerEntry {
 
 export type ReputationGrade = '甲' | '乙' | '丙' | '丁';
 
+export type CreditGrade = '甲' | '乙' | '丙' | '丁' | '戊';
+
+export type LoanStatus = 'active' | 'overdue' | 'paid';
+
+export type LoanType = 'cash' | 'vehicle';
+
+export interface Loan {
+  id: string;
+  type: LoanType;
+  principal: number;
+  interestRate: number;
+  termDays: number;
+  totalRepayment: number;
+  remainingAmount: number;
+  dueDay: number;
+  status: LoanStatus;
+  vehicleId?: string;
+  vehicleName?: string;
+  createdAt: number;
+  paidAt?: number;
+  overdueDays: number;
+}
+
+export interface SilverBank {
+  creditScore: number;
+  creditGrade: CreditGrade;
+  maxLoanAmount: number;
+  baseInterestRate: number;
+  loans: Loan[];
+  totalBorrowed: number;
+  totalRepaid: number;
+  onTimeRepayments: number;
+  lateRepayments: number;
+  largeCommissionUnlocked: boolean;
+}
+
 export interface Player {
   id: string;
   name: string;
@@ -160,6 +197,7 @@ export interface SaveGame {
   vehicles: PlayerVehicle[];
   warehouse: Warehouse;
   ledger: LedgerEntry[];
+  silverBank: SilverBank;
   currentWeatherId: string;
   savedAt: number;
 }

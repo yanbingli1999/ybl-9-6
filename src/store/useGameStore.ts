@@ -40,6 +40,21 @@ import {
   calculateLoad,
   calculateTripCost,
 } from '../utils/routeCalc';
+import {
+  createInitialSilverBank,
+  createLoan,
+  repayLoan,
+  purchaseVehicleOnCredit,
+  updateLoanOverdueStatus,
+  canBorrow,
+  calculateInterest,
+  getAvailableCredit,
+  getTotalDebt,
+  getActiveLoans,
+  LOAN_TERM_OPTIONS,
+  calculateCreditGrade,
+} from '../utils/silverBank';
+import type { SilverBank, Loan } from '../../shared/types';
 
 interface GameState {
   player: Player;
@@ -48,6 +63,7 @@ interface GameState {
   vehicles: PlayerVehicle[];
   warehouse: Warehouse;
   ledger: LedgerEntry[];
+  silverBank: SilverBank;
   currentWeather: Weather | null;
   
   cities: City[];
@@ -98,6 +114,15 @@ interface GameState {
   getAvailableVehicles: () => PlayerVehicle[];
   getAvailableRoutes: (destinationId: string) => Route[];
   getCurrentDate: () => string;
+  
+  borrowGold: (amount: number, termDays: number) => boolean;
+  repayLoan: (loanId: string, amount?: number) => boolean;
+  buyVehicleOnCredit: (vehicle: Vehicle, termDays: number) => boolean;
+  getAvailableCredit: () => number;
+  getTotalDebt: () => number;
+  getActiveLoans: () => Loan[];
+  calculateLoanInterest: (principal: number, termDays: number) => { interest: number; totalRepayment: number; dailyRate: number };
+  checkOverdueLoans: () => void;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -107,6 +132,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   vehicles: createInitialSaveGame().vehicles,
   warehouse: createInitialSaveGame().warehouse,
   ledger: [],
+  silverBank: createInitialSilverBank(),
   currentWeather: null,
   
   cities: [],
@@ -172,6 +198,7 @@ export const useGameStore = create<GameState>((set, get) => ({
           vehicles: saveData.vehicles,
           warehouse: saveData.warehouse,
           ledger: saveData.ledger,
+          silverBank: saveData.silverBank || createInitialSilverBank(),
           currentWeather: saveData.currentWeatherId 
             ? get().weatherList.find(w => w.id === saveData.currentWeatherId) || null
             : null,
@@ -196,6 +223,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       vehicles: state.vehicles,
       warehouse: state.warehouse,
       ledger: state.ledger,
+      silverBank: state.silverBank,
       currentWeatherId: state.currentWeather?.id || 'sunny',
       savedAt: Date.now(),
     };
@@ -219,6 +247,7 @@ export const useGameStore = create<GameState>((set, get) => ({
       vehicles: initial.vehicles,
       warehouse: initial.warehouse,
       ledger: [],
+      silverBank: createInitialSilverBank(),
       currentWeather: weather,
       selectedCommissions: [],
       selectedVehicle: null,
@@ -240,7 +269,8 @@ export const useGameStore = create<GameState>((set, get) => ({
       state.goodsList,
       state.cities,
       state.player.reputationGrade,
-      6
+      6,
+      state.silverBank.largeCommissionUnlocked
     );
     
     const existingIds = state.commissions.filter(c => !c.isAccepted).map(c => c.id);
@@ -711,6 +741,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     if (newPlayer.timeOfDay === 'morning') {
       weather = getRandomWeather(state.weatherList);
       get().generateDailyCommissions();
+      get().checkOverdueLoans();
     }
     
     set({
@@ -757,5 +788,214 @@ export const useGameStore = create<GameState>((set, get) => ({
   
   getCurrentDate: () => {
     return getCurrentDate(get().player.currentDay);
+  },
+  
+  borrowGold: (amount: number, termDays: number) => {
+    const state = get();
+    
+    const borrowCheck = canBorrow(state.silverBank, amount);
+    if (!borrowCheck.canBorrow) {
+      set({ error: borrowCheck.reason || '无法借款' });
+      return false;
+    }
+    
+    if (!LOAN_TERM_OPTIONS.includes(termDays)) {
+      set({ error: '不支持的借款期限' });
+      return false;
+    }
+    
+    const { loan, silverBank: newSilverBank } = createLoan(
+      'cash',
+      amount,
+      termDays,
+      state.player.currentDay,
+      state.silverBank
+    );
+    
+    const ledgerEntry: LedgerEntry = {
+      id: generateId(),
+      type: 'income',
+      description: `银号借款 - ${termDays}天期限`,
+      amount,
+      date: getCurrentDate(state.player.currentDay),
+      day: state.player.currentDay,
+      category: '借款',
+      createdAt: Date.now(),
+    };
+    
+    set({
+      silverBank: newSilverBank,
+      player: {
+        ...state.player,
+        gold: state.player.gold + amount,
+      },
+      ledger: [...state.ledger, ledgerEntry],
+    });
+    
+    api.ledger.post(ledgerEntry);
+    get().saveGame();
+    
+    return true;
+  },
+  
+  repayLoan: (loanId: string, paymentAmount?: number) => {
+    const state = get();
+    
+    const loan = state.silverBank.loans.find(l => l.id === loanId);
+    if (!loan || loan.status === 'paid') {
+      set({ error: '贷款不存在或已还清' });
+      return false;
+    }
+    
+    const amountToPay = paymentAmount || loan.remainingAmount;
+    
+    if (state.player.gold < amountToPay) {
+      set({ error: '金币不足，无法还款' });
+      return false;
+    }
+    
+    const result = repayLoan(
+      loanId,
+      state.silverBank,
+      state.player.currentDay,
+      paymentAmount
+    );
+    
+    const newRep = Math.max(0, Math.min(1000,
+      state.player.reputation + result.reputationChange
+    ));
+    const repInfo = calculateReputationGrade(newRep);
+    
+    const ledgerEntry: LedgerEntry = {
+      id: generateId(),
+      type: 'expense',
+      description: result.wasOnTime
+        ? `还款 - ${loan.type === 'vehicle' ? '购车贷款' : '现金贷款'}`
+        : `逾期还款 - ${loan.type === 'vehicle' ? '购车贷款' : '现金贷款'}`,
+      amount: result.repaidAmount,
+      date: getCurrentDate(state.player.currentDay),
+      day: state.player.currentDay,
+      category: '还款',
+      createdAt: Date.now(),
+    };
+    
+    set({
+      silverBank: result.silverBank,
+      player: {
+        ...state.player,
+        gold: state.player.gold - result.repaidAmount,
+        reputation: newRep,
+        reputationGrade: repInfo.grade as ReputationGrade,
+        priceBonus: repInfo.priceBonus,
+      },
+      ledger: [...state.ledger, ledgerEntry],
+    });
+    
+    api.ledger.post(ledgerEntry);
+    get().saveGame();
+    
+    return true;
+  },
+  
+  buyVehicleOnCredit: (vehicle: Vehicle, termDays: number) => {
+    const state = get();
+    
+    if (!LOAN_TERM_OPTIONS.includes(termDays)) {
+      set({ error: '不支持的分期期限' });
+      return false;
+    }
+    
+    const result = purchaseVehicleOnCredit(
+      vehicle,
+      termDays,
+      state.player.currentDay,
+      state.silverBank
+    );
+    
+    if (!result.success || !result.silverBank || !result.playerVehicle) {
+      set({ error: result.reason || '赊购失败' });
+      return false;
+    }
+    
+    const ledgerEntry: LedgerEntry = {
+      id: generateId(),
+      type: 'expense',
+      description: `赊购${vehicle.name} - 首付0金币`,
+      amount: 0,
+      date: getCurrentDate(state.player.currentDay),
+      day: state.player.currentDay,
+      category: '购车',
+      createdAt: Date.now(),
+    };
+    
+    set({
+      silverBank: result.silverBank,
+      vehicles: [...state.vehicles, result.playerVehicle],
+      ledger: [...state.ledger, ledgerEntry],
+    });
+    
+    api.ledger.post(ledgerEntry);
+    get().saveGame();
+    
+    return true;
+  },
+  
+  getAvailableCredit: () => {
+    return getAvailableCredit(get().silverBank);
+  },
+  
+  getTotalDebt: () => {
+    return getTotalDebt(get().silverBank);
+  },
+  
+  getActiveLoans: () => {
+    return getActiveLoans(get().silverBank);
+  },
+  
+  calculateLoanInterest: (principal: number, termDays: number) => {
+    const state = get();
+    const creditInfo = calculateCreditGrade(state.silverBank.creditScore);
+    return calculateInterest(
+      principal,
+      termDays,
+      state.silverBank.baseInterestRate,
+      creditInfo.interestRateModifier
+    );
+  },
+  
+  checkOverdueLoans: () => {
+    const state = get();
+    const result = updateLoanOverdueStatus(state.silverBank, state.player.currentDay);
+    
+    if (result.newlyOverdue.length === 0) return;
+    
+    const newRep = Math.max(0, Math.min(1000,
+      state.player.reputation + result.reputationChange
+    ));
+    const repInfo = calculateReputationGrade(newRep);
+    
+    const newLedgerEntries = result.newlyOverdue.map(loan => ({
+      id: generateId(),
+      type: 'expense' as const,
+      description: `贷款逾期 - ${loan.type === 'vehicle' ? '购车贷款' : '现金贷款'}`,
+      amount: Math.floor(loan.remainingAmount * 0.05),
+      date: getCurrentDate(state.player.currentDay),
+      day: state.player.currentDay,
+      category: '罚息',
+      createdAt: Date.now(),
+    }));
+    
+    set({
+      silverBank: result.silverBank,
+      player: {
+        ...state.player,
+        reputation: newRep,
+        reputationGrade: repInfo.grade as ReputationGrade,
+        priceBonus: repInfo.priceBonus,
+      },
+      ledger: [...state.ledger, ...newLedgerEntries],
+    });
+    
+    api.ledger.postBatch(newLedgerEntries);
   },
 }));

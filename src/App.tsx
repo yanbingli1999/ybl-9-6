@@ -3,6 +3,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from "react-router-d
 import Header from './components/layout/Header';
 import Sidebar from './components/layout/Sidebar';
 import PortHall from './components/port/PortHall';
+import SilverBank from './components/silverBank/SilverBank';
 import RoutePlanner from './components/route/RoutePlanner';
 import TransportManager from './components/transport/TransportManager';
 import Warehouse from './components/warehouse/Warehouse';
@@ -56,6 +57,7 @@ export default function App() {
           <main className="flex-1 overflow-auto">
             <Routes>
               <Route path="/" element={<PortHall />} />
+              <Route path="/silver-bank" element={<SilverBank />} />
               <Route path="/route" element={<RoutePlanner />} />
               <Route path="/transport" element={<TransportManager />} />
               <Route path="/warehouse" element={<Warehouse />} />
