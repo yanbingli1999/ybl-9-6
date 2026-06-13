@@ -135,8 +135,15 @@ export const getActiveLoans = (silverBank: SilverBank): Loan[] => {
   return silverBank.loans.filter(l => l.status === 'active' || l.status === 'overdue');
 };
 
-export const getTotalDebt = (silverBank: SilverBank): number => {
-  return getActiveLoans(silverBank).reduce((sum, loan) => sum + loan.remainingAmount, 0);
+export const getTotalDebt = (silverBank: SilverBank, currentDay?: number): number => {
+  const activeLoans = getActiveLoans(silverBank);
+  if (currentDay === undefined) {
+    return activeLoans.reduce((sum, loan) => sum + loan.remainingAmount, 0);
+  }
+  return activeLoans.reduce((sum, loan) => {
+    const debtInfo = calculateLoanCurrentDebt(loan, currentDay);
+    return sum + debtInfo.currentDebt;
+  }, 0);
 };
 
 export const getAvailableCredit = (silverBank: SilverBank): number => {
@@ -161,6 +168,33 @@ export const canBorrow = (
   return { canBorrow: true };
 };
 
+export const calculateLoanCurrentDebt = (
+  loan: Loan,
+  currentDay: number
+): { currentDebt: number; totalPenalty: number; overdueDays: number; isOverdue: boolean } => {
+  if (loan.status === 'paid') {
+    return { currentDebt: 0, totalPenalty: 0, overdueDays: 0, isOverdue: false };
+  }
+
+  const isOverdue = currentDay > loan.dueDay;
+  if (!isOverdue) {
+    return {
+      currentDebt: loan.remainingAmount,
+      totalPenalty: 0,
+      overdueDays: 0,
+      isOverdue: false,
+    };
+  }
+
+  const overdueDays = currentDay - loan.dueDay;
+  const penaltyRate = 0.01;
+  const dailyPenalty = Math.floor(loan.totalRepayment * penaltyRate);
+  const totalPenalty = dailyPenalty * overdueDays;
+  const currentDebt = loan.totalRepayment + totalPenalty;
+
+  return { currentDebt, totalPenalty, overdueDays, isOverdue };
+};
+
 export const repayLoan = (
   loanId: string,
   silverBank: SilverBank,
@@ -173,6 +207,7 @@ export const repayLoan = (
   wasOnTime: boolean;
   reputationChange: number;
   creditChange: number;
+  totalPenalty: number;
 } => {
   const loan = silverBank.loans.find(l => l.id === loanId);
   if (!loan) {
@@ -183,29 +218,25 @@ export const repayLoan = (
       wasOnTime: false,
       reputationChange: 0,
       creditChange: 0,
+      totalPenalty: 0,
     };
   }
 
-  const isOverdue = currentDay > loan.dueDay;
-  const overdueDays = isOverdue ? currentDay - loan.dueDay : 0;
+  const { currentDebt, totalPenalty, overdueDays, isOverdue } = calculateLoanCurrentDebt(
+    loan,
+    currentDay
+  );
 
-  let updatedRemaining = loan.remainingAmount;
-  if (isOverdue && loan.status === 'active') {
-    const penaltyRate = 0.01;
-    const penalty = Math.floor(loan.remainingAmount * penaltyRate * overdueDays);
-    updatedRemaining += penalty;
-  }
-
-  const amountToPay = paymentAmount || updatedRemaining;
-  const actualPayment = Math.min(amountToPay, updatedRemaining);
-  const isFullyRepaid = actualPayment >= updatedRemaining;
+  const amountToPay = paymentAmount || currentDebt;
+  const actualPayment = Math.min(amountToPay, currentDebt);
+  const isFullyRepaid = actualPayment >= currentDebt;
   const wasOnTime = !isOverdue && isFullyRepaid;
 
   const newLoans = silverBank.loans.map(l => {
     if (l.id !== loanId) return l;
     return {
       ...l,
-      remainingAmount: Math.max(0, updatedRemaining - actualPayment),
+      remainingAmount: Math.max(0, currentDebt - actualPayment),
       status: (isFullyRepaid ? 'paid' : (isOverdue ? 'overdue' : 'active')) as LoanStatus,
       overdueDays: isOverdue ? overdueDays : 0,
       paidAt: isFullyRepaid ? Date.now() : undefined,
@@ -247,6 +278,7 @@ export const repayLoan = (
     wasOnTime,
     reputationChange,
     creditChange,
+    totalPenalty,
   };
 };
 
@@ -258,23 +290,46 @@ export const updateLoanOverdueStatus = (
   newlyOverdue: Loan[];
   reputationChange: number;
   creditChange: number;
+  totalPenalty: number;
 } => {
   let reputationChange = 0;
   let creditChange = 0;
+  let totalPenalty = 0;
   const newlyOverdue: Loan[] = [];
+  const penaltyRate = 0.01;
+  const dailyReputationPenalty = 5;
+  const dailyCreditPenalty = 10;
 
   const newLoans = silverBank.loans.map(loan => {
-    if (loan.status !== 'active') return loan;
+    if (loan.status === 'paid') return loan;
 
     const isOverdue = currentDay > loan.dueDay;
     if (!isOverdue) return loan;
 
     const overdueDays = currentDay - loan.dueDay;
+    const previousOverdueDays = loan.overdueDays;
+    const newOverdueDays = overdueDays - previousOverdueDays;
 
-    if (loan.overdueDays === 0) {
+    if (previousOverdueDays === 0) {
       newlyOverdue.push(loan);
       reputationChange -= 20;
       creditChange -= 50;
+    }
+
+    if (newOverdueDays > 0) {
+      const dailyPenalty = Math.floor(loan.remainingAmount * penaltyRate);
+      const periodPenalty = dailyPenalty * newOverdueDays;
+      totalPenalty += periodPenalty;
+
+      reputationChange -= dailyReputationPenalty * newOverdueDays;
+      creditChange -= dailyCreditPenalty * newOverdueDays;
+
+      return {
+        ...loan,
+        remainingAmount: loan.remainingAmount + periodPenalty,
+        status: 'overdue' as const,
+        overdueDays,
+      };
     }
 
     return {
@@ -296,7 +351,7 @@ export const updateLoanOverdueStatus = (
     largeCommissionUnlocked: creditInfo.unlocksLargeCommission,
   };
 
-  return { silverBank: newSilverBank, newlyOverdue, reputationChange, creditChange };
+  return { silverBank: newSilverBank, newlyOverdue, reputationChange, creditChange, totalPenalty };
 };
 
 export const purchaseVehicleOnCredit = (

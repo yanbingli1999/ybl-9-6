@@ -22,6 +22,7 @@ const SilverBank = () => {
     getTotalDebt,
     getActiveLoans,
     calculateLoanInterest,
+    getLoanCurrentDebt,
     vehicleTemplates,
   } = useGameStore();
 
@@ -383,11 +384,12 @@ const SilverBank = () => {
                   <div className="space-y-4">
                     {activeLoans.map(loan => {
                     const statusInfo = getLoanStatusInfo(loan);
+                    const debtInfo = getLoanCurrentDebt(loan.id);
                     return (
                       <div
                         key={loan.id}
                         className={`p-4 rounded-xl border-2 ${
-                          loan.status === 'overdue'
+                          debtInfo.isOverdue
                             ? 'border-red-200 bg-red-50'
                             : 'border-slate-200'
                         }`}
@@ -423,8 +425,8 @@ const SilverBank = () => {
                         <div className="grid grid-cols-3 gap-4 mb-4">
                           <div>
                             <div className="text-xs text-slate-500">待还金额</div>
-                            <div className="text-lg font-bold text-slate-800">
-                              ¥{loan.remainingAmount.toLocaleString()}
+                            <div className={`text-lg font-bold ${debtInfo.isOverdue ? 'text-red-600' : 'text-slate-800'}`}>
+                              ¥{debtInfo.currentDebt.toLocaleString()}
                             </div>
                           </div>
                           <div>
@@ -441,22 +443,30 @@ const SilverBank = () => {
                           </div>
                         </div>
 
-                        {loan.status === 'overdue' && (
-                          <div className="mb-3 p-3 bg-red-100 rounded-lg flex items-center gap-2">
-                            <AlertTriangle className="w-4 h-4 text-red-500" />
-                            <span className="text-sm text-red-700">
-                              已逾期 {loan.overdueDays} 天，将产生罚息并影响信用
-                            </span>
+                        {debtInfo.isOverdue && (
+                          <div className="mb-3">
+                            <div className="p-3 bg-red-100 rounded-lg flex items-center gap-2 mb-2">
+                              <AlertTriangle className="w-4 h-4 text-red-500" />
+                              <span className="text-sm text-red-700">
+                                已逾期 {debtInfo.overdueDays} 天，将产生罚息并影响信用
+                              </span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                              <span className="text-slate-500">逾期罚息</span>
+                              <span className="font-medium text-red-600">
+                                ¥{debtInfo.totalPenalty.toLocaleString()}
+                              </span>
+                            </div>
                           </div>
                         )}
 
                         <button
                           onClick={() => handleRepay(loan.id)}
-                          disabled={player.gold < loan.remainingAmount}
+                          disabled={player.gold < debtInfo.currentDebt}
                           className={`w-full flex items-center justify-center gap-2 px-4 py-2 bg-gradient-to-r from-emerald-500 to-green-500 text-white font-medium rounded-lg hover:from-emerald-400 hover:to-green-400 transition-all disabled:opacity-50 disabled:cursor-not-allowed`}
                         >
                           <CheckCircle className="w-4 h-4" />
-                          立即还款 ¥{loan.remainingAmount.toLocaleString()}
+                          立即还款 ¥{debtInfo.currentDebt.toLocaleString()}
                         </button>
                       </div>
                     );
